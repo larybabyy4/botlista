@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Controle - Bot de Divulgação</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .channels, .users {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f8f9fa;
+        }
+        .button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .approve {
+            background-color: #28a745;
+            color: white;
+        }
+        .disapprove {
+            background-color: #dc3545;
+            color: white;
+        }
+        .ban {
+            background-color: #dc3545;
+            color: white;
+        }
+        .unban {
+            background-color: #28a745;
+            color: white;
+        }
+        h1, h2 {
+            color: #1a1a1a;
+            margin-bottom: 20px;
+        }
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .badge-success {
+            background-color: #28a745;
+            color: white;
+        }
+        .badge-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Painel de Controle - Bot de Divulgação</h1>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Total de Canais</h3>
+                <p><%= stats.totalChannels %></p>
+            </div>
+            <div class="stat-card">
+                <h3>Usuários</h3>
+                <p><%= stats.totalUsers %></p>
+            </div>
+            <div class="stat-card">
+                <h3>Pendentes</h3>
+                <p><%= stats.pendingApproval %></p>
+            </div>
+            <div class="stat-card">
+                <h3>Por Categoria</h3>
+                <p>100-1000: <%= stats.categories['100-1000'] %></p>
+                <p>1000-5000: <%= stats.categories['1000-5000'] %></p>
+                <p>5000+: <%= stats.categories['5000+'] %></p>
+            </div>
+        </div>
+
+        <div class="channels">
+            <h2>Canais</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Título</th>
+                        <th>Username</th>
+                        <th>Membros</th>
+                        <th>Categoria</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% channels.forEach(channel => { %>
+                        <tr>
+                            <td><%= channel.title %></td>
+                            <td>@<%= channel.username %></td>
+                            <td><%= channel.memberCount %></td>
+                            <td><%= channel.category %></td>
+                            <td>
+                                <span class="badge <%= channel.isApproved ? 'badge-success' : 'badge-danger' %>">
+                                    <%= channel.isApproved ? 'Aprovado' : 'Pendente' %>
+                                </span>
+                            </td>
+                            <td>
+                                <form style="display: inline" method="POST" action="<%= channel.isApproved ? '/disapprove' : '/approve' %>/<%= channel.channelId %>">
+                                    <button class="button <%= channel.isApproved ? 'disapprove' : 'approve' %>">
+                                        <%= channel.isApproved ? 'Desaprovar' : 'Aprovar' %>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="users">
+            <h2>Usuários</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Canais</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% users.forEach(user => { %>
+                        <tr>
+                            <td><%= user.userId %></td>
+                            <td><%= user.channelCount %></td>
+                            <td>
+                                <span class="badge <%= user.isBanned ? 'badge-danger' : 'badge-success' %>">
+                                    <%= user.isBanned ? 'Banido' : 'Ativo' %>
+                                </span>
+                            </td>
+                            <td>
+                                <form style="display: inline" method="POST" action="<%= user.isBanned ? '/unban' : '/ban' %>/<%= user.userId %>">
+                                    <button class="button <%= user.isBanned ? 'unban' : 'ban' %>">
+                                        <%= user.isBanned ? 'Desbanir' : 'Banir' %>
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

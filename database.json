@@ -1,0 +1,20 @@
+{
+  "channels": [
+    {
+      "channelId": "-1002272146467",
+      "title": "canaltreste",
+      "memberCount": 2,
+      "category": "100-1000",
+      "ownerId": "6107582514",
+      "isApproved": true,
+      "inviteLink": "https://t.me/+v56uMGPJVrQzMTNh"
+    }
+  ],
+  "users": [
+    {
+      "userId": "6107582514",
+      "channelCount": 1,
+      "isBanned": false
+    }
+  ]
+}
