@@ -1,20 +1,28 @@
-const TelegramBot = require('node-telegram-bot-api');
-const schedule = require('node-schedule');
-const express = require('express');
-const fs = require('fs');
-require('dotenv').config();
+import TelegramBot from 'node-telegram-bot-api';
+import schedule from 'node-schedule';
+import express from 'express';
+import fs from 'fs';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// Setup __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load environment variables
+dotenv.config();
 
 // Initialize Express
 const app = express();
 app.set('view engine', 'ejs');
-app.set('views', './src/views');
+app.set('views', join(__dirname, 'views'));
 app.use(express.urlencoded({ extended: true }));
 
 // Initialize JSON storage
 const DB_FILE = './database.json';
 let db = {
   channels: [],
-  groups: [],
   users: []
 };
 
@@ -60,7 +68,6 @@ function createUser(userId) {
   const user = {
     userId: userId.toString(),
     channelCount: 0,
-    groupCount: 0,
     isBanned: false
   };
   db.users.push(user);
@@ -72,70 +79,55 @@ function findChannel(channelId) {
   return db.channels.find(c => c.channelId === channelId.toString());
 }
 
-function findGroup(groupId) {
-  return db.groups.find(g => g.groupId === groupId.toString());
+// Create chunks of array for buttons
+function chunkArray(array, size) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += size) {
+    chunks.push(array.slice(i, i + size));
+  }
+  return chunks;
 }
 
 // Web interface routes
 app.get('/', (req, res) => {
   const stats = {
     totalChannels: db.channels.length,
-    totalGroups: db.groups.length,
     totalUsers: db.users.length,
-    pendingApproval: db.channels.filter(c => !c.isApproved).length + db.groups.filter(g => !g.isApproved).length,
+    pendingApproval: db.channels.filter(c => !c.isApproved).length,
     categories: {
-      '100-1000': db.channels.filter(c => c.category === '100-1000').length + db.groups.filter(g => g.category === '100-1000').length,
-      '1000-5000': db.channels.filter(c => c.category === '1000-5000').length + db.groups.filter(g => g.category === '1000-5000').length,
-      '5000+': db.channels.filter(c => c.category === '5000+').length + db.groups.filter(g => g.category === '5000+').length
+      '100-1000': db.channels.filter(c => c.category === '100-1000').length,
+      '1000-5000': db.channels.filter(c => c.category === '1000-5000').length,
+      '5000+': db.channels.filter(c => c.category === '5000+').length
     }
   };
   
   res.render('dashboard', { 
     channels: db.channels,
-    groups: db.groups,
     users: db.users,
     stats
   });
 });
 
-app.post('/approve/:id', (req, res) => {
-  const channel = findChannel(req.params.id);
-  const group = findGroup(req.params.id);
-  
+app.post('/approve/:channelId', (req, res) => {
+  const channel = findChannel(req.params.channelId);
   if (channel) {
     channel.isApproved = true;
     saveDB();
     bot.sendMessage(channel.channelId, 
-      '✅ Canal aprovado!\n' +
-      'As divulgações começarão no próximo ciclo.'
-    );
-  } else if (group) {
-    group.isApproved = true;
-    saveDB();
-    bot.sendMessage(group.groupId, 
-      '✅ Grupo aprovado!\n' +
+      '✅ Canal/grupo aprovado!\n' +
       'As divulgações começarão no próximo ciclo.'
     );
   }
   res.redirect('/');
 });
 
-app.post('/disapprove/:id', (req, res) => {
-  const channel = findChannel(req.params.id);
-  const group = findGroup(req.params.id);
-  
+app.post('/disapprove/:channelId', (req, res) => {
+  const channel = findChannel(req.params.channelId);
   if (channel) {
     channel.isApproved = false;
     saveDB();
     bot.sendMessage(channel.channelId, 
-      '❌ Canal desaprovado.\n' +
-      'Entre em contato com o administrador para mais informações.'
-    );
-  } else if (group) {
-    group.isApproved = false;
-    saveDB();
-    bot.sendMessage(group.groupId, 
-      '❌ Grupo desaprovado.\n' +
+      '❌ Canal/grupo desaprovado.\n' +
       'Entre em contato com o administrador para mais informações.'
     );
   }
@@ -160,85 +152,78 @@ app.post('/unban/:userId', (req, res) => {
   res.redirect('/');
 });
 
-// Auto-register channel or group when bot is added as admin
+// Auto-register channel when bot is added as admin
 bot.on('my_chat_member', async (chatMember) => {
   try {
-    const chatId = chatMember.chat.id;
-    const addedBy = chatMember.from.id;
-    let user = findUser(addedBy) || createUser(addedBy);
-    
-    if (user.isBanned) {
-      await bot.sendMessage(chatId, '❌ Usuário banido não pode registrar canais ou grupos.');
-      return;
-    }
+    if ((chatMember.chat.type === 'channel' || chatMember.chat.type === 'supergroup') && 
+        chatMember.new_chat_member.status === 'administrator') {
+      
+      const channelId = chatMember.chat.id;
+      const chatInfo = await bot.getChat(channelId);
+      const memberCount = await bot.getChatMemberCount(channelId);
+      const addedBy = chatMember.from.id;
+      let user = findUser(addedBy) || createUser(addedBy);
+      
+      if (user.isBanned) {
+        await bot.sendMessage(channelId, '❌ Usuário banido não pode registrar canais/grupos.');
+        return;
+      }
 
-    if (chatMember.new_chat_member.status === 'administrator') {
-      const chatInfo = await bot.getChat(chatId);
-      const memberCount = await bot.getChatMemberCount(chatId);
+      if (user.channelCount >= 50) {
+        await bot.sendMessage(channelId, '❌ Limite máximo de 3 canais/grupos atingido.');
+        return;
+      }
 
       if (memberCount < 1) {
-        await bot.sendMessage(chatId, 
-          '❌ Canal/Grupo não registrado: mínimo de 100 membros necessário.\n' +
+        await bot.sendMessage(channelId, 
+          '❌ Canal/grupo não registrado: mínimo de 100 membros necessário.\n' +
           `Membros atuais: ${memberCount}`
         );
         return;
       }
 
-      // Gerar link de convite
-      const inviteLink = await bot.exportChatInviteLink(chatId);
+      // Generate invite link
+      let inviteLink;
+      try {
+        inviteLink = await bot.exportChatInviteLink(channelId);
+      } catch (error) {
+        console.error('Error generating invite link:', error);
+        inviteLink = null;
+      }
 
       let category;
       if (memberCount < 1000) category = '100-1000';
       else if (memberCount < 5000) category = '1000-5000';
       else category = '5000+';
 
-      const chatData = {
-        id: chatId.toString(),
+      const channel = {
+        channelId: channelId.toString(),
         title: chatInfo.title,
         memberCount,
         category,
         ownerId: addedBy.toString(),
         username: chatInfo.username,
+        inviteLink,
         isApproved: false,
-        inviteLink: inviteLink // Salvar o link de convite
+        type: chatMember.chat.type
       };
 
-      if (chatMember.chat.type === 'channel') {
-        if (user.channelCount >= 3) {
-          await bot.sendMessage(chatId, '❌ Limite máximo de 3 canais atingido.');
-          return;
-        }
-
-        const existingChannel = findChannel(chatId);
-        if (existingChannel) {
-          Object.assign(existingChannel, chatData);
-        } else {
-          db.channels.push(chatData);
-          user.channelCount++;
-        }
-      } else if (chatMember.chat.type === 'group' || chatMember.chat.type === 'supergroup') {
-        if (user.groupCount >= 3) {
-          await bot.sendMessage(chatId, '❌ Limite máximo de 3 grupos atingido.');
-          return;
-        }
-
-        const existingGroup = findGroup(chatId);
-        if (existingGroup) {
-          Object.assign(existingGroup, chatData);
-        } else {
-          db.groups.push(chatData);
-          user.groupCount++;
-        }
+      const existingChannel = findChannel(channelId);
+      if (existingChannel) {
+        Object.assign(existingChannel, channel);
+      } else {
+        db.channels.push(channel);
+        user.channelCount++;
       }
 
       saveDB();
 
-      await bot.sendMessage(chatId, 
-        '✅ Canal/Grupo registrado automaticamente!\n\n' +
+      await bot.sendMessage(channelId, 
+        '✅ Canal/grupo registrado automaticamente!\n\n' +
         `📌 Título: ${chatInfo.title}\n` +
         `👥 Membros: ${memberCount}\n` +
         `📊 Categoria: ${category}\n` +
-        `🔗 Link de convite: ${inviteLink}\n\n` +
+        `🔗 Link de convite: ${inviteLink || 'Não disponível'}\n\n` +
         'ℹ️ Aguardando aprovação para início das divulgações.'
       );
     }
@@ -264,9 +249,8 @@ bot.onText(/\/start/, async (msg) => {
     await bot.sendMessage(chatId, 
       'Bem-vindo ao Bot de Divulgação! 📢\n\n' +
       'Comandos disponíveis:\n' +
-      '/registrar - Registrar um novo canal ou grupo\n' +
-      '/minhascanais - Ver seus canais registrados\n' +
-      '/meusgrupos - Ver seus grupos registrados\n' +
+      '/registrar - Registrar um novo canal/grupo\n' +
+      '/minhascanais - Ver seus canais/grupos registrados\n' +
       '/listas - Ver listas de divulgação\n' +
       '/ajuda - Ver instruções de uso'
     );
@@ -284,20 +268,20 @@ bot.onText(/\/registrar/, async (msg) => {
     let user = findUser(userId) || createUser(userId);
 
     if (user.isBanned) {
-      return bot.sendMessage(chatId, '❌ Você está banido e não pode registrar canais ou grupos.');
+      return bot.sendMessage(chatId, '❌ Você está banido e não pode registrar canais/grupos.');
     }
 
-    if (user.channelCount >= 3 && user.groupCount >= 3) {
-      return bot.sendMessage(chatId, '❌ Você já atingiu o limite máximo de 3 canais e 3 grupos.');
+    if (user.channelCount >= 3) {
+      return bot.sendMessage(chatId, '❌ Você já atingiu o limite máximo de 3 canais/grupos.');
     }
 
     await bot.sendMessage(chatId, 
       '📝 Para registrar um canal ou grupo:\n\n' +
-      '1. Adicione este bot como administrador do seu canal/grupo\n' +
+      '1. Adicione este bot como administrador\n' +
       '2. O registro será feito automaticamente!\n\n' +
       'Requisitos:\n' +
       '• Mínimo de 100 membros\n' +
-      '• Canal/Grupo deve ser público\n' +
+      '• Canal/grupo deve ser público\n' +
       '• Bot precisa ser administrador'
     );
   } catch (error) {
@@ -315,109 +299,132 @@ bot.onText(/\/minhascanais/, async (msg) => {
     const userChannels = db.channels.filter(c => c.ownerId === userId.toString());
 
     if (userChannels.length === 0) {
-      return bot.sendMessage(chatId, '📢 Você ainda não tem canais registrados.');
+      return bot.sendMessage(chatId, '📢 Você ainda não tem canais/grupos registrados.');
     }
 
     const channelList = userChannels.map(channel => 
       `📌 ${channel.title}\n` +
       `👥 ${channel.memberCount} membros\n` +
       `📊 Categoria: ${channel.category}\n` +
-      `🔗 Link: ${channel.inviteLink}\n` +
-      `✅ Aprovado: ${channel.isApproved ? 'Sim' : 'Não'}\n`
+      `✅ Aprovado: ${channel.isApproved ? 'Sim' : 'Não'}\n` +
+      `📱 Tipo: ${channel.type === 'channel' ? 'Canal' : 'Grupo'}\n` +
+      `🔗 Link: ${channel.inviteLink || 'Não disponível'}\n`
     ).join('\n');
 
     await bot.sendMessage(chatId, 
-      '📋 Seus canais registrados:\n\n' + channelList
+      '📋 Seus canais/grupos registrados:\n\n' + channelList
     );
   } catch (error) {
     console.error('Error in /minhascanais command:', error);
-    await bot.sendMessage(msg.chat.id, '❌ Ocorreu um erro ao listar seus canais. Por favor, tente novamente.');
+    await bot.sendMessage(msg.chat.id, '❌ Ocorreu um erro ao listar seus canais/grupos. Por favor, tente novamente.');
   }
 });
 
-bot.onText(/\/meusgrupos/, async (msg) => {
+bot.onText(/\/listas/, async (msg) => {
   try {
-    const userId = msg.from.id;
     const chatId = msg.chat.id;
-    console.log('My groups command received from:', userId);
+    console.log('Lists command received from:', chatId);
 
-    const userGroups = db.groups.filter(g => g.ownerId === userId.toString());
+    const categories = ['100-1000', '1000-5000', '5000+'];
+    let fullMessage = '📢 Listas de Divulgação\n\n';
 
-    if (userGroups.length === 0) {
-      return bot.sendMessage(chatId, '📢 Você ainda não tem grupos registrados.');
+    for (const category of categories) {
+      const channels = db.channels.filter(c => c.category === category && c.isApproved);
+
+      if (channels.length > 0) {
+        fullMessage += `📊 Categoria ${category} membros:\n`;
+        channels.forEach(channel => {
+          fullMessage += `• ${channel.title} (${channel.type === 'channel' ? 'Canal' : 'Grupo'})\n  ${channel.inviteLink || '@' + channel.username}\n`;
+        });
+        fullMessage += '\n';
+      }
     }
 
-    const groupList = userGroups.map(group => 
-      `📌 ${group.title}\n` +
-      `👥 ${group.memberCount} membros\n` +
-      `📊 Categoria: ${group.category}\n` +
-      `🔗 Link: ${group.inviteLink}\n` +
-      `✅ Aprovado: ${group.isApproved ? 'Sim' : 'Não'}\n`
-    ).join('\n');
+    await bot.sendMessage(chatId, fullMessage);
+  } catch (error) {
+    console.error('Error in /listas command:', error);
+    await bot.sendMessage(msg.chat.id, '❌ Ocorreu um erro ao listar os canais/grupos. Por favor, tente novamente.');
+  }
+});
 
-    await bot.sendMessage(chatId, 
-      '📋 Seus grupos registrados:\n\n' + groupList
+bot.onText(/\/ajuda/, async (msg) => {
+  try {
+    const chatId = msg.chat.id;
+    console.log('Help command received from:', chatId);
+
+    await bot.sendMessage(chatId,
+      '📖 Instruções de Uso\n\n' +
+      '1️⃣ Para registrar um canal ou grupo:\n' +
+      '• Use /registrar para ver as instruções\n' +
+      '• Adicione o bot como admin\n' +
+      '• O registro será automático!\n\n' +
+      '2️⃣ Requisitos:\n' +
+      '• Mínimo 100 membros\n' +
+      '• Canal/grupo deve ser público\n' +
+      '• Bot precisa ser admin\n\n' +
+      '3️⃣ Limites:\n' +
+      '• Máximo 3 canais/grupos por usuário\n' +
+      '• Divulgação a cada minuto\n\n' +
+      '4️⃣ Comandos:\n' +
+      '/start - Iniciar bot\n' +
+      '/registrar - Novo canal/grupo\n' +
+      '/minhascanais - Ver seus canais/grupos\n' +
+      '/listas - Ver divulgações\n' +
+      '/ajuda - Ver este menu'
     );
   } catch (error) {
-    console.error('Error in /meusgrupos command:', error);
-    await bot.sendMessage(msg.chat.id, '❌ Ocorreu um erro ao listar seus grupos. Por favor, tente novamente.');
+    console.error('Error in /ajuda command:', error);
+    await bot.sendMessage(msg.chat.id, '❌ Ocorreu um erro ao mostrar a ajuda. Por favor, tente novamente.');
   }
 });
 
 // Schedule promotional posts every minute
-schedule.scheduleJob('* * * * *', async () => {
+schedule.scheduleJob('*/10 * * * *', async () => {
   try {
     const categories = ['100-1000', '1000-5000', '5000+'];
     
     for (const category of categories) {
       const channels = db.channels.filter(c => c.category === category && c.isApproved);
-      const groups = db.groups.filter(g => g.category === category && g.isApproved);
+      if (channels.length === 0) continue;
 
-      if (channels.length > 0) {
-        // Dividir os canais em grupos de 20
-        const chunkSize = 20;
-        for (let i = 0; i < channels.length; i += chunkSize) {
-          const chunk = channels.slice(i, i + chunkSize);
+      // Create header message
+      const headerMessage = `📢 Lista de Canais e Grupos Parceiros\n` +
+                          `📊 Categoria: ${category} membros\n` +
+                          `👥 Total: ${channels.length} participantes\n\n` +
+                          `Clique nos botões abaixo para entrar:`;
 
-          // Criar botões para cada canal
-          const buttons = chunk.map(channel => ({
-            text: channel.title,
-            url: channel.inviteLink
-          }));
+      // Create inline keyboard with up to 20 buttons
+      const inlineKeyboard = channels.slice(0, 20).map(channel => [{
+        text: `${channel.title} (${channel.type === 'channel' ? 'Canal' : 'Grupo'})`,
+        url: channel.inviteLink || `https://t.me/${channel.username}`
+      }]);
 
-          // Enviar mensagem com botões
-          const message = `📢 Lista de Canais Parceiros (${category} membros)\n\n` +
-            'Clique nos botões abaixo para entrar nos canais:';
+      // Footer message
+      const footerMessage = '\n\n💡 Divulgação automática a cada minuto\n' +
+                          '🤖 Para participar, adicione nosso bot como admin!';
 
-          await bot.sendMessage(chunk[0].id, message, {
+      for (const channel of channels) {
+        try {
+          const sent = await bot.sendMessage(channel.channelId, headerMessage, {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
             reply_markup: {
-              inline_keyboard: [buttons]
+              inline_keyboard: inlineKeyboard
             }
           });
-        }
-      }
+          
+          // Pin message for 30 seconds if it's a channel
+          if (channel.type === 'channel') {
+            await bot.pinChatMessage(channel.channelId, sent.message_id);
+		setTimeout(() => {
+		bot.unpinChatMessage(channel.channelId);
+		}, 30000);
+          }
 
-      if (groups.length > 0) {
-        // Dividir os grupos em grupos de 20
-        const chunkSize = 20;
-        for (let i = 0; i < groups.length; i += chunkSize) {
-          const chunk = groups.slice(i, i + chunkSize);
-
-          // Criar botões para cada grupo
-          const buttons = chunk.map(group => ({
-            text: group.title,
-            url: group.inviteLink
-          }));
-
-          // Enviar mensagem com botões
-          const message = `📢 Lista de Grupos Parceiros (${category} membros)\n\n` +
-            'Clique nos botões abaixo para entrar nos grupos:';
-
-          await bot.sendMessage(chunk[0].id, message, {
-            reply_markup: {
-              inline_keyboard: [buttons]
-            }
-          });
+          // Send footer as separate message
+          await bot.sendMessage(channel.channelId, footerMessage);
+        } catch (error) {
+          console.error(`Error posting to ${channel.type} ${channel.title}:`, error);
         }
       }
     }

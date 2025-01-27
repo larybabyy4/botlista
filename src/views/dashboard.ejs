@@ -1,190 +1,124 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel de Controle - Bot de Divulgação</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background-color: #f0f2f5;
-        }
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        .stat-card {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .channels, .users {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-        }
-        th, td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }
-        th {
-            background-color: #f8f9fa;
-        }
-        .button {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-        .approve {
-            background-color: #28a745;
-            color: white;
-        }
-        .disapprove {
-            background-color: #dc3545;
-            color: white;
-        }
-        .ban {
-            background-color: #dc3545;
-            color: white;
-        }
-        .unban {
-            background-color: #28a745;
-            color: white;
-        }
-        h1, h2 {
-            color: #1a1a1a;
-            margin-bottom: 20px;
-        }
-        .badge {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-        }
-        .badge-success {
-            background-color: #28a745;
-            color: white;
-        }
-        .badge-danger {
-            background-color: #dc3545;
-            color: white;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel de Controle - Bot de Divulgação</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
-<body>
-    <div class="container">
-        <h1>Painel de Controle - Bot de Divulgação</h1>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <h3>Total de Canais</h3>
-                <p><%= stats.totalChannels %></p>
-            </div>
-            <div class="stat-card">
-                <h3>Usuários</h3>
-                <p><%= stats.totalUsers %></p>
-            </div>
-            <div class="stat-card">
-                <h3>Pendentes</h3>
-                <p><%= stats.pendingApproval %></p>
-            </div>
-            <div class="stat-card">
-                <h3>Por Categoria</h3>
-                <p>100-1000: <%= stats.categories['100-1000'] %></p>
-                <p>1000-5000: <%= stats.categories['1000-5000'] %></p>
-                <p>5000+: <%= stats.categories['5000+'] %></p>
-            </div>
-        </div>
-
-        <div class="channels">
-            <h2>Canais</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Título</th>
-                        <th>Username</th>
-                        <th>Membros</th>
-                        <th>Categoria</th>
-                        <th>Status</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <% channels.forEach(channel => { %>
-                        <tr>
-                            <td><%= channel.title %></td>
-                            <td>@<%= channel.username %></td>
-                            <td><%= channel.memberCount %></td>
-                            <td><%= channel.category %></td>
-                            <td>
-                                <span class="badge <%= channel.isApproved ? 'badge-success' : 'badge-danger' %>">
-                                    <%= channel.isApproved ? 'Aprovado' : 'Pendente' %>
-                                </span>
-                            </td>
-                            <td>
-                                <form style="display: inline" method="POST" action="<%= channel.isApproved ? '/disapprove' : '/approve' %>/<%= channel.channelId %>">
-                                    <button class="button <%= channel.isApproved ? 'disapprove' : 'approve' %>">
-                                        <%= channel.isApproved ? 'Desaprovar' : 'Aprovar' %>
-                                    </button>
-                                </form>
-                            </td>
-                        </tr>
-                    <% }); %>
-                </tbody>
-            </table>
-        </div>
-
-        <div class="users">
-            <h2>Usuários</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Canais</th>
-                        <th>Status</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <% users.forEach(user => { %>
-                        <tr>
-                            <td><%= user.userId %></td>
-                            <td><%= user.channelCount %></td>
-                            <td>
-                                <span class="badge <%= user.isBanned ? 'badge-danger' : 'badge-success' %>">
-                                    <%= user.isBanned ? 'Banido' : 'Ativo' %>
-                                </span>
-                            </td>
-                            <td>
-                                <form style="display: inline" method="POST" action="<%= user.isBanned ? '/unban' : '/ban' %>/<%= user.userId %>">
-                                    <button class="button <%= user.isBanned ? 'unban' : 'ban' %>">
-                                        <%= user.isBanned ? 'Desbanir' : 'Banir' %>
-                                    </button>
-                                </form>
-                            </td>
-                        </tr>
-                    <% }); %>
-                </tbody>
-            </table>
-        </div>
+<body class="bg-gray-100">
+  <div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-8">Painel de Controle</h1>
+    
+    <!-- Stats -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+      <div class="bg-white p-4 rounded-lg shadow">
+        <h3 class="text-lg font-semibold">Total de Canais</h3>
+        <p class="text-2xl"><%= stats.totalChannels %></p>
+      </div>
+      <div class="bg-white p-4 rounded-lg shadow">
+        <h3 class="text-lg font-semibold">Total de Usuários</h3>
+        <p class="text-2xl"><%= stats.totalUsers %></p>
+      </div>
+      <div class="bg-white p-4 rounded-lg shadow">
+        <h3 class="text-lg font-semibold">Aguardando Aprovação</h3>
+        <p class="text-2xl"><%= stats.pendingApproval %></p>
+      </div>
+      <div class="bg-white p-4 rounded-lg shadow">
+        <h3 class="text-lg font-semibold">Categorias</h3>
+        <p>100-1000: <%= stats.categories['100-1000'] %></p>
+        <p>1000-5000: <%= stats.categories['1000-5000'] %></p>
+        <p>5000+: <%= stats.categories['5000+'] %></p>
+      </div>
     </div>
+
+    <!-- Channels -->
+    <div class="bg-white rounded-lg shadow p-6 mb-8">
+      <h2 class="text-2xl font-bold mb-4">Canais</h2>
+      <div class="overflow-x-auto">
+        <table class="min-w-full">
+          <thead>
+            <tr class="bg-gray-100">
+              <th class="px-4 py-2">Canal</th>
+              <th class="px-4 py-2">Membros</th>
+              <th class="px-4 py-2">Categoria</th>
+              <th class="px-4 py-2">Status</th>
+              <th class="px-4 py-2">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% channels.forEach(channel => { %>
+              <tr class="border-t">
+                <td class="px-4 py-2"><%= channel.title %></td>
+                <td class="px-4 py-2"><%= channel.memberCount %></td>
+                <td class="px-4 py-2"><%= channel.category %></td>
+                <td class="px-4 py-2">
+                  <% if (channel.isApproved) { %>
+                    <span class="text-green-600">Aprovado</span>
+                  <% } else { %>
+                    <span class="text-yellow-600">Pendente</span>
+                  <% } %>
+                </td>
+                <td class="px-4 py-2">
+                  <% if (!channel.isApproved) { %>
+                    <form action="/approve/<%= channel.channelId %>" method="POST" class="inline">
+                      <button class="bg-green-500 text-white px-3 py-1 rounded">Aprovar</button>
+                    </form>
+                  <% } else { %>
+                    <form action="/disapprove/<%= channel.channelId %>" method="POST" class="inline">
+                      <button class="bg-red-500 text-white px-3 py-1 rounded">Desaprovar</button>
+                    </form>
+                  <% } %>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Users -->
+    <div class="bg-white rounded-lg shadow p-6">
+      <h2 class="text-2xl font-bold mb-4">Usuários</h2>
+      <div class="overflow-x-auto">
+        <table class="min-w-full">
+          <thead>
+            <tr class="bg-gray-100">
+              <th class="px-4 py-2">ID</th>
+              <th class="px-4 py-2">Canais</th>
+              <th class="px-4 py-2">Status</th>
+              <th class="px-4 py-2">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% users.forEach(user => { %>
+              <tr class="border-t">
+                <td class="px-4 py-2"><%= user.userId %></td>
+                <td class="px-4 py-2"><%= user.channelCount %></td>
+                <td class="px-4 py-2">
+                  <% if (user.isBanned) { %>
+                    <span class="text-red-600">Banido</span>
+                  <% } else { %>
+                    <span class="text-green-600">Ativo</span>
+                  <% } %>
+                </td>
+                <td class="px-4 py-2">
+                  <% if (user.isBanned) { %>
+                    <form action="/unban/<%= user.userId %>" method="POST" class="inline">
+                      <button class="bg-green-500 text-white px-3 py-1 rounded">Desbanir</button>
+                    </form>
+                  <% } else { %>
+                    <form action="/ban/<%= user.userId %>" method="POST" class="inline">
+                      <button class="bg-red-500 text-white px-3 py-1 rounded">Banir</button>
+                    </form>
+                  <% } %>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
