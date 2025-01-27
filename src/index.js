@@ -14,6 +14,7 @@ app.use(express.urlencoded({ extended: true }));
 const DB_FILE = './database.json';
 let db = {
   channels: [],
+  groups: [],
   users: []
 };
 
@@ -59,6 +60,7 @@ function createUser(userId) {
   const user = {
     userId: userId.toString(),
     channelCount: 0,
+    groupCount: 0,
     isBanned: false
   };
   db.users.push(user);
@@ -70,28 +72,36 @@ function findChannel(channelId) {
   return db.channels.find(c => c.channelId === channelId.toString());
 }
 
+function findGroup(groupId) {
+  return db.groups.find(g => g.groupId === groupId.toString());
+}
+
 // Web interface routes
 app.get('/', (req, res) => {
   const stats = {
     totalChannels: db.channels.length,
+    totalGroups: db.groups.length,
     totalUsers: db.users.length,
-    pendingApproval: db.channels.filter(c => !c.isApproved).length,
+    pendingApproval: db.channels.filter(c => !c.isApproved).length + db.groups.filter(g => !g.isApproved).length,
     categories: {
-      '100-1000': db.channels.filter(c => c.category === '100-1000').length,
-      '1000-5000': db.channels.filter(c => c.category === '1000-5000').length,
-      '5000+': db.channels.filter(c => c.category === '5000+').length
+      '100-1000': db.channels.filter(c => c.category === '100-1000').length + db.groups.filter(g => g.category === '100-1000').length,
+      '1000-5000': db.channels.filter(c => c.category === '1000-5000').length + db.groups.filter(g => g.category === '1000-5000').length,
+      '5000+': db.channels.filter(c => c.category === '5000+').length + db.groups.filter(g => g.category === '5000+').length
     }
   };
   
   res.render('dashboard', { 
     channels: db.channels,
+    groups: db.groups,
     users: db.users,
     stats
   });
 });
 
-app.post('/approve/:channelId', (req, res) => {
-  const channel = findChannel(req.params.channelId);
+app.post('/approve/:id', (req, res) => {
+  const channel = findChannel(req.params.id);
+  const group = findGroup(req.params.id);
+  
   if (channel) {
     channel.isApproved = true;
     saveDB();
@@ -99,17 +109,33 @@ app.post('/approve/:channelId', (req, res) => {
       '✅ Canal aprovado!\n' +
       'As divulgações começarão no próximo ciclo.'
     );
+  } else if (group) {
+    group.isApproved = true;
+    saveDB();
+    bot.sendMessage(group.groupId, 
+      '✅ Grupo aprovado!\n' +
+      'As divulgações começarão no próximo ciclo.'
+    );
   }
   res.redirect('/');
 });
 
-app.post('/disapprove/:channelId', (req, res) => {
-  const channel = findChannel(req.params.channelId);
+app.post('/disapprove/:id', (req, res) => {
+  const channel = findChannel(req.params.id);
+  const group = findGroup(req.params.id);
+  
   if (channel) {
     channel.isApproved = false;
     saveDB();
     bot.sendMessage(channel.channelId, 
       '❌ Canal desaprovado.\n' +
+      'Entre em contato com o administrador para mais informações.'
+    );
+  } else if (group) {
+    group.isApproved = false;
+    saveDB();
+    bot.sendMessage(group.groupId, 
+      '❌ Grupo desaprovado.\n' +
       'Entre em contato com o administrador para mais informações.'
     );
   }
@@ -134,46 +160,40 @@ app.post('/unban/:userId', (req, res) => {
   res.redirect('/');
 });
 
-// Auto-register channel when bot is added as admin
+// Auto-register channel or group when bot is added as admin
 bot.on('my_chat_member', async (chatMember) => {
   try {
-    if (chatMember.chat.type === 'channel' && 
-        chatMember.new_chat_member.status === 'administrator') {
-      
-      const channelId = chatMember.chat.id;
-      const chatInfo = await bot.getChat(channelId);
-      const memberCount = await bot.getChatMemberCount(channelId);
-      const addedBy = chatMember.from.id;
-      let user = findUser(addedBy) || createUser(addedBy);
-      
-      if (user.isBanned) {
-        await bot.sendMessage(channelId, '❌ Usuário banido não pode registrar canais.');
-        return;
-      }
+    const chatId = chatMember.chat.id;
+    const addedBy = chatMember.from.id;
+    let user = findUser(addedBy) || createUser(addedBy);
+    
+    if (user.isBanned) {
+      await bot.sendMessage(chatId, '❌ Usuário banido não pode registrar canais ou grupos.');
+      return;
+    }
 
-      if (user.channelCount >= 3) {
-        await bot.sendMessage(channelId, '❌ Limite máximo de 3 canais atingido.');
-        return;
-      }
+    if (chatMember.new_chat_member.status === 'administrator') {
+      const chatInfo = await bot.getChat(chatId);
+      const memberCount = await bot.getChatMemberCount(chatId);
 
       if (memberCount < 1) {
-        await bot.sendMessage(channelId, 
-          '❌ Canal não registrado: mínimo de 100 membros necessário.\n' +
+        await bot.sendMessage(chatId, 
+          '❌ Canal/Grupo não registrado: mínimo de 100 membros necessário.\n' +
           `Membros atuais: ${memberCount}`
         );
         return;
       }
 
       // Gerar link de convite
-      const inviteLink = await bot.exportChatInviteLink(channelId);
+      const inviteLink = await bot.exportChatInviteLink(chatId);
 
       let category;
       if (memberCount < 1000) category = '100-1000';
       else if (memberCount < 5000) category = '1000-5000';
       else category = '5000+';
 
-      const channel = {
-        channelId: channelId.toString(),
+      const chatData = {
+        id: chatId.toString(),
         title: chatInfo.title,
         memberCount,
         category,
@@ -183,18 +203,38 @@ bot.on('my_chat_member', async (chatMember) => {
         inviteLink: inviteLink // Salvar o link de convite
       };
 
-      const existingChannel = findChannel(channelId);
-      if (existingChannel) {
-        Object.assign(existingChannel, channel);
-      } else {
-        db.channels.push(channel);
-        user.channelCount++;
+      if (chatMember.chat.type === 'channel') {
+        if (user.channelCount >= 3) {
+          await bot.sendMessage(chatId, '❌ Limite máximo de 3 canais atingido.');
+          return;
+        }
+
+        const existingChannel = findChannel(chatId);
+        if (existingChannel) {
+          Object.assign(existingChannel, chatData);
+        } else {
+          db.channels.push(chatData);
+          user.channelCount++;
+        }
+      } else if (chatMember.chat.type === 'group' || chatMember.chat.type === 'supergroup') {
+        if (user.groupCount >= 3) {
+          await bot.sendMessage(chatId, '❌ Limite máximo de 3 grupos atingido.');
+          return;
+        }
+
+        const existingGroup = findGroup(chatId);
+        if (existingGroup) {
+          Object.assign(existingGroup, chatData);
+        } else {
+          db.groups.push(chatData);
+          user.groupCount++;
+        }
       }
 
       saveDB();
 
-      await bot.sendMessage(channelId, 
-        '✅ Canal registrado automaticamente!\n\n' +
+      await bot.sendMessage(chatId, 
+        '✅ Canal/Grupo registrado automaticamente!\n\n' +
         `📌 Título: ${chatInfo.title}\n` +
         `👥 Membros: ${memberCount}\n` +
         `📊 Categoria: ${category}\n` +
@@ -206,7 +246,7 @@ bot.on('my_chat_member', async (chatMember) => {
     console.error('Error in auto-registration:', error);
     try {
       await bot.sendMessage(chatMember.chat.id, 
-        '❌ Erro ao registrar canal automaticamente.\n' +
+        '❌ Erro ao registrar canal/grupo automaticamente.\n' +
         'Por favor, verifique se o bot tem todas as permissões necessárias.'
       );
     } catch (sendError) {
@@ -224,8 +264,9 @@ bot.onText(/\/start/, async (msg) => {
     await bot.sendMessage(chatId, 
       'Bem-vindo ao Bot de Divulgação! 📢\n\n' +
       'Comandos disponíveis:\n' +
-      '/registrar - Registrar um novo canal\n' +
+      '/registrar - Registrar um novo canal ou grupo\n' +
       '/minhascanais - Ver seus canais registrados\n' +
+      '/meusgrupos - Ver seus grupos registrados\n' +
       '/listas - Ver listas de divulgação\n' +
       '/ajuda - Ver instruções de uso'
     );
@@ -243,20 +284,20 @@ bot.onText(/\/registrar/, async (msg) => {
     let user = findUser(userId) || createUser(userId);
 
     if (user.isBanned) {
-      return bot.sendMessage(chatId, '❌ Você está banido e não pode registrar canais.');
+      return bot.sendMessage(chatId, '❌ Você está banido e não pode registrar canais ou grupos.');
     }
 
-    if (user.channelCount >= 3) {
-      return bot.sendMessage(chatId, '❌ Você já atingiu o limite máximo de 3 canais.');
+    if (user.channelCount >= 3 && user.groupCount >= 3) {
+      return bot.sendMessage(chatId, '❌ Você já atingiu o limite máximo de 3 canais e 3 grupos.');
     }
 
     await bot.sendMessage(chatId, 
-      '📝 Para registrar um canal:\n\n' +
-      '1. Adicione este bot como administrador do seu canal\n' +
+      '📝 Para registrar um canal ou grupo:\n\n' +
+      '1. Adicione este bot como administrador do seu canal/grupo\n' +
       '2. O registro será feito automaticamente!\n\n' +
       'Requisitos:\n' +
       '• Mínimo de 100 membros\n' +
-      '• Canal deve ser público\n' +
+      '• Canal/Grupo deve ser público\n' +
       '• Bot precisa ser administrador'
     );
   } catch (error) {
@@ -294,6 +335,35 @@ bot.onText(/\/minhascanais/, async (msg) => {
   }
 });
 
+bot.onText(/\/meusgrupos/, async (msg) => {
+  try {
+    const userId = msg.from.id;
+    const chatId = msg.chat.id;
+    console.log('My groups command received from:', userId);
+
+    const userGroups = db.groups.filter(g => g.ownerId === userId.toString());
+
+    if (userGroups.length === 0) {
+      return bot.sendMessage(chatId, '📢 Você ainda não tem grupos registrados.');
+    }
+
+    const groupList = userGroups.map(group => 
+      `📌 ${group.title}\n` +
+      `👥 ${group.memberCount} membros\n` +
+      `📊 Categoria: ${group.category}\n` +
+      `🔗 Link: ${group.inviteLink}\n` +
+      `✅ Aprovado: ${group.isApproved ? 'Sim' : 'Não'}\n`
+    ).join('\n');
+
+    await bot.sendMessage(chatId, 
+      '📋 Seus grupos registrados:\n\n' + groupList
+    );
+  } catch (error) {
+    console.error('Error in /meusgrupos command:', error);
+    await bot.sendMessage(msg.chat.id, '❌ Ocorreu um erro ao listar seus grupos. Por favor, tente novamente.');
+  }
+});
+
 // Schedule promotional posts every minute
 schedule.scheduleJob('* * * * *', async () => {
   try {
@@ -301,28 +371,54 @@ schedule.scheduleJob('* * * * *', async () => {
     
     for (const category of categories) {
       const channels = db.channels.filter(c => c.category === category && c.isApproved);
-      if (channels.length === 0) continue;
+      const groups = db.groups.filter(g => g.category === category && g.isApproved);
 
-      // Dividir os canais em grupos de 20
-      const chunkSize = 20;
-      for (let i = 0; i < channels.length; i += chunkSize) {
-        const chunk = channels.slice(i, i + chunkSize);
+      if (channels.length > 0) {
+        // Dividir os canais em grupos de 20
+        const chunkSize = 20;
+        for (let i = 0; i < channels.length; i += chunkSize) {
+          const chunk = channels.slice(i, i + chunkSize);
 
-        // Criar botões para cada canal
-        const buttons = chunk.map(channel => ({
-          text: channel.title,
-          url: channel.inviteLink
-        }));
+          // Criar botões para cada canal
+          const buttons = chunk.map(channel => ({
+            text: channel.title,
+            url: channel.inviteLink
+          }));
 
-        // Enviar mensagem com botões
-        const message = `📢 Lista de Canais Parceiros (${category} membros)\n\n` +
-          'Clique nos botões abaixo para entrar nos canais:';
+          // Enviar mensagem com botões
+          const message = `📢 Lista de Canais Parceiros (${category} membros)\n\n` +
+            'Clique nos botões abaixo para entrar nos canais:';
 
-        await bot.sendMessage(chunk[0].channelId, message, {
-          reply_markup: {
-            inline_keyboard: [buttons]
-          }
-        });
+          await bot.sendMessage(chunk[0].id, message, {
+            reply_markup: {
+              inline_keyboard: [buttons]
+            }
+          });
+        }
+      }
+
+      if (groups.length > 0) {
+        // Dividir os grupos em grupos de 20
+        const chunkSize = 20;
+        for (let i = 0; i < groups.length; i += chunkSize) {
+          const chunk = groups.slice(i, i + chunkSize);
+
+          // Criar botões para cada grupo
+          const buttons = chunk.map(group => ({
+            text: group.title,
+            url: group.inviteLink
+          }));
+
+          // Enviar mensagem com botões
+          const message = `📢 Lista de Grupos Parceiros (${category} membros)\n\n` +
+            'Clique nos botões abaixo para entrar nos grupos:';
+
+          await bot.sendMessage(chunk[0].id, message, {
+            reply_markup: {
+              inline_keyboard: [buttons]
+            }
+          });
+        }
       }
     }
   } catch (error) {
